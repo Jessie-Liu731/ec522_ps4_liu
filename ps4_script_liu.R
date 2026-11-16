@@ -267,8 +267,122 @@ forecast::dm.test(e_var4, e_bvar, h = 1, power = 2)
 ###Both dm-test results suggest that, for GDP growth and unemployment rate, forecast produced by the BVAR(4) with lambda equals to 0.3 is performing better than the OLS VAR(4) model at either the 5% or 10% level.  
 ###This suggests that shrinkage does help to tackle the problem brought by adding parameters. However, at the mean time, there are some uncertainty. Since many of the differences are small and not necessarily statitically significant, reading the rakings in that table should be more cautious.
 
+## Part 5 - A Factor Model with FRED-MD
 
+###5.1. the data
 
+md_raw <- read_csv("data/fredmd_2026-09.csv", show_col_types = FALSE)
+tcode <- unlist(md_raw[1, -1])
+md <- md_raw[-1, ] |> mutate(date = as.Date(sasdate, "%m/%d/%Y"))
+
+transform_series <- function(x, code) {
+  d <- function(v) c(NA, diff(v))
+  switch(as.character(code),
+         "1" = x,                      # level
+         "2" = d(x),                   # first difference
+         "3" = d(d(x)),                # second difference
+         "4" = log(x),                 # log
+         "5" = 100 * d(log(x)),        # growth rate
+         "6" = 100 * d(d(log(x))),     # change in the growth rate
+         "7" = d(x / dplyr::lag(x) - 1))
+}
+
+fm <- map2_dfc(md[names(tcode)], tcode, transform_series) |>
+  mutate(date = md$date, .before = 1) |>
+  filter(date >= as.Date("1960-03-01"), date <= as.Date("2019-12-01"))
+
+fm <- fm[, colSums(is.na(fm)) == 0]
+
+dim(fm)
+
+tcode[c("INDPRO", "PAYEMS", "CPIAUCSL", "FEDFUNDS")]
+
+###The "INDPRO" and "PAYEMS" are both transformed into growth rate, the "CPIAUCSL" is transformed into change in the growth rate, the "FEDFUNDS" is transformed into first difference. 
+###The "INDPRO" may be a series of its own level trending upward while the "FEDFUNDS" be a series of growth rate already with a trend. 
+###In this sense, it would be more informative and easier to interpret the result after taking logs of the "INDPRO" and first difference of the "FEDFUNDS".
+
+###5.2. estimate the factors
+
+###5.2a.
+
+Z <- fm |> select(-date) |> as.matrix()
+
+pc <- prcomp(scale(Z))
+
+summary(pc)$importance[, 1:5]
+
+###The first three factors explain 29.5% of the variation in all 121 series.  
+
+###5.2b.
+
+F1 <- pc$x[, 1] * sign(cor(pc$x[, 1], fm$INDPRO))
+
+tibble(date = fm$date, F1 = F1) |>
+  ggplot(aes(date, F1)) +
+  geom_line() +
+  labs(title = "First Factor from FRED-MD", x = NULL, y = NULL) +
+  theme_minimal()
+
+###5.2c.
+
+sort(abs(cor(pc$x[, 1], Z))[1, ], decreasing = TRUE)[1:8]
+sort(abs(cor(pc$x[, 2], Z))[1, ], decreasing = TRUE)[1:8]
+
+###The first factor might be a real activity factor since it falls sharply in every recession with high correlation with employment and industrial production.
+###The second factor might be an inflation factor with a high correaltion with the change in CPI inflation.
+
+### 5.3. Replicate the Horse Race from Class
+
+ip <- fm$INDPRO
+n <- nrow(Z)
+init <- which(fm$date == as.Date("1989-12-01"))
+
+e_ar <- NULL
+e_fa <- NULL
+for (T in init:(n - 1)) {
+  F_T <- prcomp(scale(Z[1:T, ]))$x[, 1:3]         # factors using data through T
+  d <- data.frame(y_next = ip[2:T], y = ip[1:(T - 1)], F_T[1:(T - 1), ])
+  new <- data.frame(y = ip[T], t(F_T[T, ]))
+  e_ar <- c(e_ar, ip[T + 1] - predict(lm(y_next ~ y, d), new))
+  e_fa <- c(e_fa, ip[T + 1] - predict(lm(y_next ~ ., d), new))
+}
+
+c(RMSE_AR = sqrt(mean(e_ar^2)), RMSE_FA = sqrt(mean(e_fa^2)))
+
+###To estimate the factors once, using the full sample, and then use those in the horse race is cheating because it causes information leakage. 
+###The factors are estimated using the information from the full sample, which includes the future information that we are not supposed to know standing at the forecast origin in the TS-CV. This can lead to overly optimistic results and does not reflect the true out-of-sample forecasting performance of the model.
+
+###5.4. a direct forecast of inflation
+
+direct_race <- function(series, h = 12, r = 3) {
+  lv <- md |>
+    mutate(log_x = log(.data[[series]]),
+           g = 100 * (log_x - lag(log_x))) |>
+    filter(date >= as.Date("1960-03-01"), date <= as.Date("2019-12-01"))
+  yh <- 100 * (lead(lv$log_x, h) - lv$log_x)      # growth over the next h months
+  g  <- lv$g                                      # growth over the latest month
+  
+  e_ar <- NULL
+  e_fa <- NULL
+  for (T in init:(n - h)) {
+    F_T <- prcomp(scale(Z[1:T, ]))$x[, 1:r, drop = FALSE]
+    i <- 1:(T - h)
+    d <- data.frame(yh = yh[i], g = g[i], F_T[i, , drop = FALSE])
+    new <- data.frame(g = g[T], F_T[T, , drop = FALSE])
+    e_ar <- c(e_ar, yh[T] - predict(lm(yh ~ g, d), new))
+    e_fa <- c(e_fa, yh[T] - predict(lm(yh ~ ., d), new))
+  }
+  tibble(series, forecasts = length(e_ar),
+         RMSE_AR = sqrt(mean(e_ar^2)), RMSE_FA = sqrt(mean(e_fa^2)),
+         MAE_AR = mean(abs(e_ar)), MAE_FA = mean(abs(e_fa)),
+         DM_pvalue = forecast::dm.test(e_ar, e_fa, h = h, power = 2,
+                                       varestimator = "bartlett")$p.value)
+}
+
+direct_race("CPIAUCSL")
+
+###The factors improve the forecast of 12-month CPI inflation. It reduces the RMSE by 10.4%. 
+###The difference is also statistically significant because the p-value of the DM test is much less than 0.05. This suggests that the factor-augmented model provides a significantly better forecast of inflation than the simple AR model.
 
 
 
