@@ -136,10 +136,30 @@ forecast::dm.test(liquor_errs$arima, liquor_errs$snaive, h = 1, power = 2)
 
 ## Part 3 - Forecast Combination
 
-###3a
+###3a. equal weight combination of ARIMA and ETS
+
+liquor_combo_fc <- liquor_cv_fit |>
+  mutate(combo = (arima + ets) / 2) |>
+  forecast(h = 1)
+
+liquor_combo_fc |>
+  accuracy(liquor, measures = list(RMSE = RMSE, MAE = MAE))
+
+liquor_combo_fc |>
+  accuracy(liquor, measures = list(RMSE = RMSE, MAE = MAE)) |>
+  kable(digits = 2)
+
+###The combination, with both larger RMSE and MAE, does not beat the ARIMA model. It does beat ETS that goes into it as well as the seasonal random walk model.
+
+###3b. correlation between forecast errors in models
+
+cor(liquor_errs$arima, liquor_errs$ets)
+
+###There is a high positive correlation of 0.88 between the forecast errors of the ARIMA and ETS models
+###This indicates that the two models tend to make similar errors in their forecasts, which can limit the benefits of combining them from the very beginning.
+###Additionally, the DM test says ARIMA is significantly better than ETS. The RMSE in the table also confirms that ETS is performing substantively worse than ARIMA. In this way, it is reasonable that the equal weight combination does not beat the ARIMA model.
 
 
-########################
 
 ## Part 4 - A Medium-Scale VAR vs. a BVAR
 
@@ -383,6 +403,7 @@ direct_race("CPIAUCSL")
 
 ###The factors improve the forecast of 12-month CPI inflation. It reduces the RMSE by 10.4%. 
 ###The difference is also statistically significant because the p-value of the DM test is much less than 0.05. This suggests that the factor-augmented model provides a significantly better forecast of inflation than the simple AR model.
+
 
 
 
