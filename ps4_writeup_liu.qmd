@@ -79,7 +79,8 @@ liquor_fit |> select(ets) |> report()
 ```
 
 The ARIMA model is ARIMA(1,0,2)(2,1,1) with a seasonal period of 12, and the ETS model is ETS(A,A,A), an additive Holt-Winters model.
-The ARIMA model gets one seasonal difference and no regular difference. The ETS model has an additive error component, an additive trend component and an additive seasonality component.
+The ARIMA model gets one seasonal difference and no regular difference. 
+The ETS model has an additive error component, an additive trend component and an additive seasonality component. Since the original series is logged, the additive components in the ETS model are actually multiplicative in the original series.
 
 ##### 2.2b ljung-box test for residuals in ARIMA model
 ```{r}
@@ -241,10 +242,10 @@ The VAR(1) has a smaller RMSE for 7 out of 8 variables, meaning that it forecast
 fc_bvar_03 <- readRDS("results/fc_bvar_03.rds")
 readRDS("results/var_results.rds") 
 ```
-The BVAR(4) with lamba equals to 0.3 has smaller RMSE for all the variables than OLS VAR(4). This means that with the shrinkage, the BVAR with same number of variables and lags as an OLS VAR can tackle the overfitting problem to some extent.
-The BVAR(4) with lamba equals to 0.3 has smaller RMSE for 3 out of 8 variables than OLS VAR(1) model. This means that the smaller number of lags included in the VAR(1) can also be helpful to tackle the overfitting problem.
-When lambda equals to 0.05, our prior becomes much tighter, suggesting that we are more confident in that guess. Thus, the shrinkage becomes heavier with every lag coefficient getting pulled close to its prior mean of zero, which would be close to a simple benchmark mean model.
-It would not be a fair estimate of how accurately it will forecast in the future. A fair estimate would require testing the chosen model on some new pseudo out-of-sample data and we also need a DM-test to confirm the statistical significance of the difference between the models. 
+The BVAR(4) (λ = 0.3) has smaller RMSE for all the variables than OLS VAR(4). This means that with the shrinkage, the BVAR with same number of variables and lags as an OLS VAR can tackle the overfitting problem to some extent.
+The BVAR(4) (λ = 0.3) has smaller RMSE for 3 out of 8 variables than OLS VAR(1) model. This means that the limited number of lags included in the VAR(1) can also be helpful to tackle the overfitting problem.
+When λ = 0.05, our prior becomes much tighter. Thus, the shrinkage becomes heavier with every lag coefficient getting pulled close to its prior mean of zero, which would be close to a simple benchmark mean model. However, the results show that, with λ = 0.05 the RMSE rises for 7 of 8 variables, suggesting there might be too much shrinkage. The model underfits and does not incorporate useful information as much as needed in the lags. Together with the OLS VAR(4) result, this shows that the best amount of shrinkage lies somewhere in between. 
+It would not be a fair estimate of how accurately it will forecast in the future. A fair estimate would require testing the chosen model on some new pseudo out-of-sample data to show that this win is not luck and we also need a DM-test to confirm the statistical significance of the difference between the models. 
 
 ##### 4.3c DM-test
 ```{r}
@@ -258,7 +259,8 @@ e_bvar <- actual[, "unrate"] - fc_bvar_03[, 6]
 
 forecast::dm.test(e_var4, e_bvar, h = 1, power = 2)
 ```
-Both dm-test results suggest that, for GDP growth and unemployment rate, forecast produced by the BVAR(4) with lambda equals to 0.3 is performing better than the OLS VAR(4) model at either the 5% or 10% level.  
+For the variable GDP, DM equals to 2.14 with a p-value of 0.035, suggesting this result is significant at the 5% level. For the variable Unemployment, DM equals 1.79 with a p-value of 0.076, suggesting this result is significant at the 10% level.
+Both dm-test results suggest that, for GDP growth and unemployment rate, forecast produced by the BVAR(4) with lambda equals to 0.3 is performing better than the OLS VAR(4) model.  
 This suggests that shrinkage does help to tackle the problem brought by adding parameters. However, at the mean time, there are some uncertainty. Since many of the differences are small and not necessarily statitically significant, reading the rakings in that table should be more cautious.
 
 
@@ -293,8 +295,8 @@ dim(fm)
 tcode[c("INDPRO", "PAYEMS", "CPIAUCSL", "FEDFUNDS")]
 ```
 The "INDPRO" and "PAYEMS" are both transformed into growth rate, the "CPIAUCSL" is transformed into change in the growth rate, the "FEDFUNDS" is transformed into first difference. 
-The "INDPRO" may be a series of its own level trending upward while the "FEDFUNDS" being a series of growth rate with a trend. 
-In this sense, the results would be more informative and easier to interpret after taking logs of the "INDPRO" and first difference of the "FEDFUNDS".
+The "INDPRO" may be a series of its own level with an upward trend while the "FEDFUNDS" being a series of rate with a trend. 
+In this sense, the results would be more informative and easier to interpret after taking logs of the "INDPRO" (the growth rate) and first difference of the "FEDFUNDS" (the change in percentage points of the rate).
 
 ### 5.2. estimate the factors
 
@@ -324,8 +326,8 @@ tibble(date = fm$date, F1 = F1) |>
 sort(abs(cor(pc$x[, 1], Z))[1, ], decreasing = TRUE)[1:8]
 sort(abs(cor(pc$x[, 2], Z))[1, ], decreasing = TRUE)[1:8]
 ```
-The first factor might be a real activity factor since it falls sharply in every recession with high correlation with employment and industrial production.
-The second factor might be an inflation factor with a high correaltion with the change in CPI inflation.
+The first factor might be a real activity factor since it falls sharply in every recession with high correlation with variables like "PAYEMS" and "IPMANSICS" that measure employment and industrial production.
+The second factor might be an inflation factor with a high correaltion with "CPIAUCSL" and "PCEPI" that measure the change in CPI inflation.
 
 ### 5.3. Replicate the Horse Race from Class
 ```{r}
@@ -345,6 +347,7 @@ for (T in init:(n - 1)) {
 
 c(RMSE_AR = sqrt(mean(e_ar^2)), RMSE_FA = sqrt(mean(e_fa^2)))
 ```
+The RMSE of the ARIMA model I got is 0.617 and of the FA model is 0.589. 
 To estimate the factors once, using the full sample, and then use those in the horse race is cheating because it causes information leakage. The factors are estimated using the information from the full sample, which includes the future information that we are not supposed to know standing at the forecast origin in the TS-CV. This might lead to overly optimistic results and does not reflect the true out-of-sample forecasting performance of the model.
 
 ##### 5.4. a direct forecast of inflation
@@ -376,15 +379,9 @@ direct_race <- function(series, h = 12, r = 3) {
 
 direct_race("CPIAUCSL")
 ```
-The factors improve the forecast of 12-month CPI inflation. It reduces the RMSE by 10.4%. The difference is also statistically significant because the p-value of the DM test is much less than 0.05. This suggests that the factor-augmented model provides a significantly better forecast of inflation than the simple AR model.
+The factors improve the forecast of 12-month CPI inflation. The RMSE is 1.89. It reduces the RMSE by 10.4%. The difference is also statistically significant because the p-value of the DM test is much less than 0.05. This suggests that the factor-augmented model provides a significantly better forecast of inflation than the simple AR model.
 
 
 ## Reflection
-Across the horse races of models, simple models are hard to beat if the data is limited, which might be most of time in practice. Since every additional estimated parameters adds estimation error and noise to the model, simple models perform well because of their parsimony in parameters. Notably, too simple or too much shrinkage can also be harmful since they cannot really capture more informative underlying patterns in the data, as seen in the failure of SNAIVE model and the BVAR(4) with lambda equals to 0.05.
-
-One idea that appeared repeatedly is that shrinkage, equal-weight combination, and factors are different ways to tackle the tradeoff between adding more parameters into the estimation and the risk of overfitting. Shrinkage pulls coefficients toward zero to make truly informative parameters flesh out. For those equally accurate models, equal-weight combination aims to avoid estimation noise based on a limited number of past forecast errors by weighting different models equally. Factors compress large amount of data from numerous series into a smaller number of components. All of them are trying to reduce effect of the estimation errors and noise brought by adding parameters on forecast accuracy. 
-
-Another recurring idea is that RMSE rankings alone are not enough, and DM tests are needed to judge whether differences in accuracy are statistically meaningful or just noise. Finally, every evaluation had to avoid information leakage by using only data available at each forecast origin, whether in the expanding-window TS-CV or when re-estimating the factors. Overall, good forecasting is about an elegant balance - using the useful information as much as possible without overfitting.
-
-
+Across the horse races of models, simple models are hard to beat if the data is limited, which might be most of time in practice. Since every additional estimated parameters adds estimation error and noise to the model, simple models perform well because of their parsimony in parameters. Notably, too simple or too much shrinkage can also be harmful since they cannot really capture more informative underlying patterns in the data, as seen in the failure of SNAIVE model and the BVAR(4) with lambda equals to 0.05. This idea relates to the underlying logic shared in the shrinkage, equal-weight combination, and factors. These practices unfold different ways to tackle the tradeoff between adding more parameters into the estimation and the risk of overfitting. Shrinkage pulls coefficients toward zero to make truly informative parameters flesh out. For those equally accurate models, equal-weight combination aims to avoid estimation noise based on a limited number of past forecast errors by weighting different models equally. Factors compress large amount of data from numerous series into a smaller number of components. All of them are trying to reduce effect of the estimation errors and noise brought by adding parameters on forecast accuracy. Overall, it is about an elegant balance that uses as much useful information as possible without overfitting with extra estimation errors and noises.
 
